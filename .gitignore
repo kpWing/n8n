@@ -1,0 +1,5 @@
+n8n-data/*
+# !n8n-data/workflows/
+# !n8n-data/credentials/
+.DS_Store
+.env
