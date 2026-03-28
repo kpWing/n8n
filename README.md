@@ -27,8 +27,8 @@ docker run -d \
 
 ```
 #コンテナ内で実行
-n8n export:workflow --id WyY5WKPc4ob5MtrX --output=/home/node/.n8n/workflows/get-and-summerize-news.json
-n8n export:credentials --all --output=/home/node/.n8n/credentials/cred.json
+n8n export:workflow --id WyY5WKPc4ob5MtrX --output=/home/node/init/workflows/get-and-summerize-news.json
+n8n export:credentials --all --output=/home/node/init/credentials/cred.json
 
 #コミットしておく・・・
 
@@ -41,7 +41,85 @@ n8n import:workflow --input=/home/node/init/workflows/get-and-summerize-news.jso
 n8n import:credentials --input=/home/node/init/credentials/cred.json
 ```
 
-### (WIP)ECSデプロイ
+### EC2にのっける
+- ローカル
+```
+# ターゲットを linux/amd64 に指定してビルド(armでもいいけどx86のほうが小さいサイズのEC2をたてられる)
+docker build --platform linux/amd64 -t my-n8n-x86 .
+
+# ただのローカル動作確認用
+docker run -d \
+  --rm \
+  -p 5678:5678 \
+  --name n8n \
+  -v ./n8n-data:/home/node/.n8n \
+  --env-file .env \
+  my-n8n-x86
+
+docker save my-n8n-x86 -o my-n8n-x86.tar
+
+scp -r my-n8n-x86.tar n8n-work:/home/ec2-user/n8n/
+
+```
+
+- EC2(動作確認用に一旦public)
+```
+sudo yum update -y
+sudo amazon-linux-extras install docker -y
+
+# Docker をインストール
+sudo dnf install -y docker
+
+# Docker サービスを有効化・起動
+sudo systemctl enable docker
+sudo systemctl start docker
+
+# ec2-user を docker グループに追加(sudo なしでdockerコマンド使えるように)
+sudo usermod -aG docker ec2-user
+# グループ追加後は再ログインが必要
+
+docker load -i n8n/my-n8n-x86.tar 
+
+mkdir -p ~/n8n-data
+sudo chown -R 1000:1000 ~/n8n-data
+
+docker run -d --name n8n \
+  --rm \
+  -p 5678:5678 \
+  --name n8n \
+  -v ./n8n-data:/home/node/.n8n \
+#### TODO：.envをEC2に配置してコマンド化する
+  my-n8n-x86
+
+
+# 動作確認
+http://{EC2のIPアドレス}:5678/
+
+docker exec -it n8n sh
+n8n import:workflow --input=/home/node/init/workflows/get-and-summerize-news.json
+n8n import:credentials --input=/home/node/init/credentials/cred.json
+
+# ここまでできたら一旦EC2からAMIを取る。起動中のEC2は止めて、AMIからprivateなEC2を作成し、Connect Endpointで接続できるようにしておく
+```
+
+- private EC2
+```
+# publicと同様にまずコンテナ起動してdocker execで入る
+n8n list:workflow
+n8n execute --id {↑で確認したID}
+N8N_BLOCK_RESOURCES=true N8N_TASK_BROKER_PORT=5680 n8n execute --id WyY5WKPc4ob5MtrX
+
+# ポートフォワーディングすればprivateEC2でもn8nのGUIを見ることができるのでpublicなEC2で動作確認する必要はなかった(NATゲートウェイの問題に気づけたので良かったとする)
+ssh -L 5678:localhost:5678 n8n
+http://localhost:5678/
+```
+
+
+
+### ECSはボツ
+--- 
+
+### ECSデプロイ
 #### 課題
 - 原因よくわかんないけど、コンテナ起動後にecs execでコンテナ入って、init/以下にあるエクスポートファイルからインポート叩いても、成功するのにサイト上は反映されない
   - 起動しっぱなしにしたくないのでそもそもインポートコマンドとかも起動時に自動でやってもらう必要あり
