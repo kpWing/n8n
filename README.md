@@ -43,76 +43,81 @@ n8n import:credentials --input=/home/node/init/credentials/cred.json
 
 ### EC2にのっける
 - ローカル
-```
-# ターゲットを linux/amd64 に指定してビルド(armでもいいけどx86のほうが小さいサイズのEC2をたてられる)
-docker build --platform linux/amd64 -t my-n8n-x86 .
+  ```
+  # ターゲットを linux/amd64 に指定してビルド(armでもいいけどx86のほうが小さいサイズのEC2をたてられる)
+  docker build --platform linux/amd64 -t my-n8n-x86 .
 
-# ただのローカル動作確認用
-docker run -d \
-  --rm \
-  -p 5678:5678 \
-  --name n8n \
-  -v ./n8n-data:/home/node/.n8n \
-  --env-file .env \
-  my-n8n-x86
+  # ただのローカル動作確認用
+  docker run -d \
+    --rm \
+    -p 5678:5678 \
+    --name n8n \
+    -v ./n8n-data:/home/node/.n8n \
+    --env-file .env \
+    my-n8n-x86
 
-docker save my-n8n-x86 -o my-n8n-x86.tar
+  docker save my-n8n-x86 -o my-n8n-x86.tar
 
-scp -r my-n8n-x86.tar n8n-work:/home/ec2-user/n8n/
+  scp -r my-n8n-x86.tar n8n-work:/home/ec2-user/n8n/
+  scp .env.ec2 n8n:/home/ec2-user/n8n/
 
-```
+  ```
 
-- EC2(動作確認用に一旦public)
-```
-sudo yum update -y
-sudo amazon-linux-extras install docker -y
+- EC2
+  - コマンドいろいろ実行
+  ```
+  sudo yum update -y
+  sudo amazon-linux-extras install docker -y
+  ```
 
-# Docker をインストール
-sudo dnf install -y docker
+  ```
+  # Docker をインストール
+  sudo dnf install -y docker
+  ```
 
-# Docker サービスを有効化・起動
-sudo systemctl enable docker
-sudo systemctl start docker
+  ```
+  # Docker サービスを有効化・起動
+  sudo systemctl enable docker
+  sudo systemctl start docker
+  ```
 
-# ec2-user を docker グループに追加(sudo なしでdockerコマンド使えるように)
-sudo usermod -aG docker ec2-user
-# グループ追加後は再ログインが必要
+  ```
+  # ec2-user を docker グループに追加(sudo なしでdockerコマンド使えるように)
+  sudo usermod -aG docker ec2-user
+  # グループ追加後は再ログインが必要
+  ```
 
-docker load -i n8n/my-n8n-x86.tar 
+  ```
+  docker load -i n8n/my-n8n-x86.tar 
 
-mkdir -p ~/n8n-data
-sudo chown -R 1000:1000 ~/n8n-data
+  mkdir -p ~/n8n-data
+  sudo chown -R 1000:1000 ~/n8n-data
 
-docker run -d --name n8n \
-  --rm \
-  -p 5678:5678 \
-  --name n8n \
-  -v ./n8n-data:/home/node/.n8n \
-#### TODO：.envをEC2に配置してコマンド化する
-  my-n8n-x86
+  # restartオプションによってインスタンス再起動時にもdocke runしてくれる
+  docker run -d --name n8n \
+    --restart=always \
+    -p 5678:5678 \
+    --name n8n \
+    --env-file n8n/.env.ec2 \
+    -v ./n8n-data:/home/node/.n8n \
+    my-n8n-x86
 
+  # 秘匿情報を含むので消しておく
+  rm n8n/.env.ec2
+  ```
 
-# 動作確認
-http://{EC2のIPアドレス}:5678/
+- 動作確認
+  - 設定のインポート
 
-docker exec -it n8n sh
-n8n import:workflow --input=/home/node/init/workflows/get-and-summerize-news.json
-n8n import:credentials --input=/home/node/init/credentials/cred.json
+  ```
+  docker exec -it n8n sh
+  n8n import:workflow --input=/home/node/init/workflows/get-and-summerize-news.json
+  n8n import:credentials --input=/home/node/init/credentials/cred.json
+  ```
 
-# ここまでできたら一旦EC2からAMIを取る。起動中のEC2は止めて、AMIからprivateなEC2を作成し、Connect Endpointで接続できるようにしておく
-```
-
-- private EC2
-```
-# publicと同様にまずコンテナ起動してdocker execで入る
-n8n list:workflow
-n8n execute --id {↑で確認したID}
-N8N_BLOCK_RESOURCES=true N8N_TASK_BROKER_PORT=5680 n8n execute --id WyY5WKPc4ob5MtrX
-
-# ポートフォワーディングすればprivateEC2でもn8nのGUIを見ることができるのでpublicなEC2で動作確認する必要はなかった(NATゲートウェイの問題に気づけたので良かったとする)
-ssh -L 5678:localhost:5678 n8n
-http://localhost:5678/
-```
+  - ポートフォワーディングすればprivateなサブネットに配置したEC2に対してもアクセスできる
+    - `ssh -L 5678:localhost:5678 n8n`
+    - http://localhost:5678/
 
 
 
